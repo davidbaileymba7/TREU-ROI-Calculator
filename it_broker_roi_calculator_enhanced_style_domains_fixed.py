@@ -3,30 +3,29 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from io import BytesIO
-from fpdf import FPDF
 
 # =====================
 # TREU Partners ROI Calculator
 # =====================
 
 # Fixed Assumptions
-YEARS = 3
-DISCOUNT_RATE = 0.10
-PRODUCTIVITY_GAIN_PCT = 15
-SALARY_PER_EMPLOYEE = 80000
-NUM_EMPLOYEES = 50
-BROKER_FEE_PCT = 5
-OPP_COST_RATE = 0.20
+YEARS = 3  # Forecast horizon in years
+DISCOUNT_RATE = 0.10  # Annual discount rate for NPV
+PRODUCTIVITY_GAIN_PCT = 15  # Productivity gain (%) from outsourcing
+SALARY_PER_EMPLOYEE = 80000  # Avg employee salary for productivity savings
+NUM_EMPLOYEES = 50  # Headcount impacted by productivity improvements
+BROKER_FEE_PCT = 5  # Brokerage fee percentage of total annual benefit
+OPP_COST_RATE = 0.20  # Opportunity cost as % of subscription spend
 
 # In-House Assumptions (Fixed, not editable)
-OPP_MULTIPLIER = 3
-BASE_HOURLY_RATE = 125.0
-OPP_COST_PER_HOUR = BASE_HOURLY_RATE * OPP_MULTIPLIER
-INHOUSE_HOURS = 200
-SUPPLIER_MGMT_PCT = 25
-SUPPLIER_HOURLY_RATE = 135.0
+OPP_MULTIPLIER = 3  # Opportunity cost multiplier applied to base hourly rate
+BASE_HOURLY_RATE = 125.0  # Avg base pay ($/hr) for IT/Procurement/Legal roles
+OPP_COST_PER_HOUR = BASE_HOURLY_RATE * OPP_MULTIPLIER  # Actual cost per diverted hour
+INHOUSE_HOURS = 200  # Hours spent in-house per sourcing project
+SUPPLIER_MGMT_PCT = 25  # % of annual time spent on supplier management
+SUPPLIER_HOURLY_RATE = 135.0  # Avg rate ($/hr) for supplier management activities
 
-# Service Categories & Industry Rates
+# Service Categories & Industry Rates (License vs. Implementation savings)
 CATEGORY_PARAMS = {
     "Software Licensing": {"license_rate": 0.50, "implementation_rate": 0.30},
     "SaaS Subscriptions": {"license_rate": 0.45, "implementation_rate": 0.25},
@@ -43,19 +42,25 @@ st.set_page_config(page_title="TREU ROI Calculator", layout="wide")
 
 # Sidebar Inputs
 with st.sidebar:
-    st.header("Inputs")
-    category = st.selectbox("Service Category", list(CATEGORY_PARAMS.keys()), help="Choose the spend category to evaluate.")
-    annual_spend = st.number_input("Annual Spend ($)", min_value=0.0, value=100000.0, help="Total annual budget in the selected category.")
+    st.header("🔧 Inputs")
+    category = st.selectbox(
+        "Service Category", list(CATEGORY_PARAMS.keys()),
+        help="Select the service area; savings rates are based on industry benchmarks for licensing and implementation costs."
+    )
+    annual_spend = st.number_input(
+        "Annual Spend ($)", min_value=0.0, value=100000.0,
+        help="Enter the total annual budget for the chosen service category; this drives license and implementation savings calculations."
+    )
     st.markdown("---")
     st.caption("Fixed assumptions (not editable):")
     st.markdown(
-        f"- Forecast Horizon: {YEARS} yrs  \
-        - Discount Rate: {int(DISCOUNT_RATE*100)}%  \
-        - Broker Fee: {BROKER_FEE_PCT}%  \
-        - Opportunity Cost: {int(OPP_COST_RATE*100)}% of spend  \
-        - Opportunity Cost Multiplier: {OPP_MULTIPLIER}× base rate at ${BASE_HOURLY_RATE}/hr = ${OPP_COST_PER_HOUR}/hr  \
-        - In-House Sourcing Hours: {INHOUSE_HOURS} hrs/project  \
-        - Supplier Mgmt Time: {SUPPLIER_MGMT_PCT}% of annual hrs at ${SUPPLIER_HOURLY_RATE}/hr"
+        f"- **Forecast Horizon:** {YEARS} years\n"
+        f"- **Discount Rate:** {int(DISCOUNT_RATE*100)}% for NPV\n"
+        f"- **Broker Fee:** {BROKER_FEE_PCT}% of the *total annual benefit* (license + implementation + productivity savings)\n"
+        f"- **Opportunity Cost:** {int(OPP_COST_RATE*100)}% of subscription spend (value of alternative investments)\n"
+        f"- **Opportunity Cost Multiplier:** {OPP_MULTIPLIER}× base hourly rate (${BASE_HOURLY_RATE}/hr) = ${OPP_COST_PER_HOUR}/hr lost per diversion\n"
+        f"- **In-House Sourcing Hours:** {INHOUSE_HOURS} hrs per project spent by internal teams\n"
+        f"- **Supplier Mgmt Time:** {SUPPLIER_MGMT_PCT}% of annual hours at ${SUPPLIER_HOURLY_RATE}/hr for ongoing supplier relationships\n"
     )
 
 # Retrieve Rates and Compute Savings
@@ -67,14 +72,17 @@ implementation_savings = annual_spend * impl_rate
 productivity_savings = PRODUCTIVITY_GAIN_PCT/100 * SALARY_PER_EMPLOYEE * NUM_EMPLOYEES
 annual_benefit = license_savings + implementation_savings + productivity_savings
 
-# Outsourced Scenario
+# Outsourced Scenario Calculations
 subscription_cost = annual_spend
 broker_fee_value = annual_benefit * BROKER_FEE_PCT/100
 opp_cost_value = subscription_cost * OPP_COST_RATE
 net_out = annual_benefit - subscription_cost - broker_fee_value - opp_cost_value
 
-# In-House Scenario
-inhouse_cost = OPP_COST_PER_HOUR * INHOUSE_HOURS + (SUPPLIER_MGMT_PCT/100) * 2080 * SUPPLIER_HOURLY_RATE
+# In-House Scenario Calculations
+inhouse_cost = (
+    OPP_COST_PER_HOUR * INHOUSE_HOURS +
+    (SUPPLIER_MGMT_PCT/100) * 2080 * SUPPLIER_HOURLY_RATE
+)
 net_in = annual_benefit - inhouse_cost
 
 # Metrics Calculation
@@ -88,54 +96,37 @@ payback_out = next((i for i,cum in enumerate(np.cumsum(cf_out),1) if cum>subscri
 payback_in = next((i for i,cum in enumerate(np.cumsum(cf_in),1) if cum>inhouse_cost), None)
 
 # Main Interface
-st.title(f"🚀 ROI Calculator — {category}")
-tab1, tab2, tab3, tab4 = st.tabs(["Summary","Breakdown","Compare","Export"])
+def main():
+    st.title(f"🚀 ROI Calculator — {category}")
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Summary","📈 Breakdown","🔍 Compare","📥 Export"])
 
-with tab1:
-    st.subheader("Key Metrics")
-    col1, col2 = st.columns(2)
-    col1.metric("Outsourced NPV", f"${npv_out:,.0f}")
-    col1.metric("Outsourced ROI", f"{roi_out:.1f}%")
-    col1.metric("Payback Period", f"{payback_out or '> Horizon'} yrs")
-    col2.metric("In-House NPV", f"${npv_in:,.0f}")
-    col2.metric("In-House ROI", f"{roi_in:.1f}%")
-    col2.metric("Payback Period", f"{payback_in or '> Horizon'} yrs")
+    with tab1:
+        st.subheader("Key Metrics")
+        c1, c2 = st.columns(2)
+        c1.metric("Outsourced NPV", f"${npv_out:,.0f}", help="Net present value of outsourcing scenario using a 10% discount rate.")
+        c1.metric("Outsourced ROI", f"{roi_out:.1f}%", help="Return on investment calculated as total net benefit divided by subscription cost.")
+        c1.metric("Payback Period", f"{payback_out or '> Horizon'} yrs", help="Number of years to recover subscription cost from net benefits.")
+        c2.metric("In-House NPV", f"${npv_in:,.0f}", help="NPV of maintaining in-house processes with fixed assumption costs.")
+        c2.metric("In-House ROI", f"{roi_in:.1f}%", help="ROI for in-house scenario based on fixed time and cost assumptions.")
+        c2.metric("Payback Period", f"{payback_in or '> Horizon'} yrs", help="Years to recover in-house costs from net in-house benefits.")
 
-with tab2:
-    st.subheader("Annual Net Benefit: Outsourced")
-    df_out = pd.DataFrame({'Year': range(1, YEARS+1), 'Net Benefit': cf_out}).set_index('Year')
-    st.bar_chart(df_out['Net Benefit'])
+    with tab2:
+        st.subheader("Annual Net Benefit: Outsourced")
+        df_out = pd.DataFrame({"Year": range(1, YEARS+1), "Net Benefit": cf_out}).set_index('Year')
+        st.bar_chart(df_out['Net Benefit'], use_container_width=True)
 
-with tab3:
-    st.subheader("Scenario Comparison")
-    df_comp = pd.DataFrame({'In-House': cf_in, 'Outsourced': cf_out}, index=range(1, YEARS+1))
-    df_comp.index.name = 'Year'
-    st.bar_chart(df_comp)
+    with tab3:
+        st.subheader("Scenario Comparison")
+        df_comp = pd.DataFrame({"In-House": cf_in, "Outsourced": cf_out}, index=range(1, YEARS+1))
+        df_comp.index.name = 'Year'
+        st.bar_chart(df_comp, use_container_width=True)
 
-with tab4:
-    st.subheader("Download Results")
-    df_export = df_comp.copy()
-    df_export['NPV Outsourced'] = npv_out
-    df_export['NPV In-House'] = npv_in
-    st.download_button("Download CSV", df_export.to_csv().encode(), "roi_results.csv")
-    
-    # PDF Export (optional)
-    try:
-        buffer = BytesIO()
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", "B", 16)
-        pdf.cell(0, 10, f"ROI Report — {category}", ln=True)
-        pdf.ln(5)
-        pdf.set_font("Arial", "", 12)
-        pdf.cell(0, 8, f"Outsourced NPV: ${npv_out:,.0f}", ln=True)
-        pdf.cell(0, 8, f"In-House NPV: ${npv_in:,.0f}", ln=True)
-        pdf.cell(0, 8, f"Outsourced ROI: {roi_out:.1f}%", ln=True)
-        pdf.cell(0, 8, f"In-House ROI: {roi_in:.1f}%", ln=True)
-        pdf.output(buffer)
-        st.download_button("Download PDF", buffer.getvalue(), "roi_report.pdf")
-    except Exception as e:
-        st.error("PDF export failed; install fpdf. Error: " + str(e))
+    with tab4:
+        st.subheader("Download Results")
+        df_export = df_comp.copy()
+        df_export['NPV Outsourced'] = npv_out
+        df_export['NPV In-House'] = npv_in
+        st.download_button("Download CSV", df_export.to_csv(index=False).encode(), "roi_results.csv")
 
-st.markdown("---")
-st.caption("*Estimates based on fixed industry assumptions.*")
+if __name__ == '__main__':
+    main()
