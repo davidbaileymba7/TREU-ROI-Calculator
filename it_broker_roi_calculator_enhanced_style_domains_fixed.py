@@ -1,162 +1,136 @@
-
+# app.py
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
+import plotly.graph_objects as go
+from io import BytesIO
+from fpdf import FPDF
 
-# Domain-specific default parameters (industry standards)
-domain_defaults = {
-    "Telecom": {"savings_pct": 35, "fee_pct": 10, "baseline_hours": 400},
-    "Mobility & IoT": {"savings_pct": 25, "fee_pct": 10, "baseline_hours": 450},
-    "Cloud & SaaS": {"savings_pct": 30, "fee_pct": 10, "baseline_hours": 500},
-    "Security": {"savings_pct": 20, "fee_pct": 10, "baseline_hours": 350},
-    "Governance": {"savings_pct": 15, "fee_pct": 10, "baseline_hours": 300},
-    "All": {"savings_pct": 30, "fee_pct": 10, "baseline_hours": 500}
+# =====================
+# TREU Partners ROI Calculator
+# =====================
+
+# Fixed Assumptions
+YEARS = 3
+DISCOUNT_RATE = 0.10
+PRODUCTIVITY_GAIN_PCT = 15
+SALARY_PER_EMPLOYEE = 80000
+NUM_EMPLOYEES = 50
+BROKER_FEE_PCT = 5
+OPP_COST_RATE = 0.20
+
+# In-House Assumptions
+OPP_MULTIPLIER = 3
+BASE_HOURLY_RATE = 125.0
+OPP_COST_PER_HOUR = BASE_HOURLY_RATE * OPP_MULTIPLIER
+INHOUSE_HOURS = 200
+SUPPLIER_MGMT_PCT = 25
+SUPPLIER_HOURLY_RATE = 135.0
+
+# Service Categories & Industry Rates
+# Sources: Flexera, IDC, Gartner, Forrester, ABI Research, SiriusDecisions
+CATEGORY_PARAMS = {
+    "Software Licensing": {"license_rate": 0.50, "implementation_rate": 0.30},
+    "SaaS Subscriptions": {"license_rate": 0.45, "implementation_rate": 0.25},
+    "Cloud Services": {"license_rate": 0.40, "implementation_rate": 0.20},
+    "Telecom Services": {"license_rate": 0.35, "implementation_rate": 0.15},
+    "Hardware Maintenance": {"license_rate": 0.30, "implementation_rate": 0.10},
+    "Mobility & IoT": {"license_rate": 0.40, "implementation_rate": 0.20},
+    "Security": {"license_rate": 0.55, "implementation_rate": 0.35},
+    "ITAM/ITSM": {"license_rate": 0.45, "implementation_rate": 0.25}
 }
 
-# -- App Configuration and Theming --
-st.set_page_config(page_title="TREU IT Broker Value Calculator", layout="wide")
-st.markdown(
-    """
-    <style>
-    .reportview-container { background-color: #FFFFFF; }
-    .sidebar .sidebar-content { background-color: #000000; color: #FFFFFF; }
-    .stMetric { padding: 1rem; background: #F0F0F0; border-radius: 0.5rem; }
-    .css-1d391kg { color: #D80016; font-size: 2rem; font-weight: bold; }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+# Page Setup
+st.set_page_config(page_title="TREU ROI Calculator", layout="wide")
+st.markdown("<style>.stTabs [data-baseweb] {font-size:1.1rem;}</style>", unsafe_allow_html=True)
 
-# -- Header & Description --
-st.title("IT Broker vs. In-House Value Calculator")
-st.markdown("**Compare your In-House procurement costs, time, and risk against engaging an IT Broker.**")
+# Sidebar Inputs
+with st.sidebar:
+    st.header("🔧 Inputs")
+    category = st.selectbox("Select Service Category", list(CATEGORY_PARAMS.keys()), help="Choose the spend category.")
+    annual_spend = st.number_input("Annual Spend ($)", min_value=0.0, value=100000.0)
+    with st.expander("ℹ️ View All Assumptions"):
+        st.markdown(f"- **Forecast Horizon:** {YEARS} years\n- **Discount Rate:** {int(DISCOUNT_RATE*100)}%\n- **Broker Fee:** {BROKER_FEE_PCT}%\n- **Opportunity Cost:** {int(OPP_COST_RATE*100)}% of spend\n")
+        st.markdown(f"- **Opportunity Cost Multiplier:** {OPP_MULTIPLIER}× base rate at ${BASE_HOURLY_RATE}/hr = ${OPP_COST_PER_HOUR}/hr\n- **In-House Sourcing Hours:** {INHOUSE_HOURS} hrs/project\n- **Supplier Mgmt Time:** {SUPPLIER_MGMT_PCT}% of annual hours at ${SUPPLIER_HOURLY_RATE}/hr\n")
 
-# -- Domain Selection --
-domain = st.selectbox("Select a Technology Domain:", list(domain_defaults.keys()))
-defaults = domain_defaults[domain]
+# Compute Rates
+rates = CATEGORY_PARAMS[category]
+license_rate = rates["license_rate"]
+impl_rate = rates["implementation_rate"]
 
-# -- Input Sections --
-with st.expander("Financial Inputs", expanded=True):
-    col1, col2, col3 = st.columns(3)
-    baseline_spend = col1.number_input("Annual IT Spend ($)", value=1_000_000, step=50_000)
-    savings_pct = col2.slider(
-        "Expected Broker Savings (%)", 0, 100, defaults["savings_pct"],
-        help="Typical savings benchmark for selected domain"
-    )
-    fee_pct = col3.slider(
-        "Broker Fee (%)", 0, 50, defaults["fee_pct"],
-        help="Standard broker fee for selected domain"
-    )
+# Calculations
+license_savings = annual_spend * license_rate
+implementation_savings = annual_spend * impl_rate
+prod_savings = PRODUCTIVITY_GAIN_PCT/100 * SALARY_PER_EMPLOYEE * NUM_EMPLOYEES
+annual_benefit = license_savings + implementation_savings + prod_savings
+broker_fee = annual_benefit * BROKER_FEE_PCT/100
+opp_cost = annual_spend * OPP_COST_RATE
+net_out = annual_benefit - annual_spend - broker_fee - opp_cost
+inhouse_cost = OPP_COST_PER_HOUR * INHOUSE_HOURS + (SUPPLIER_MGMT_PCT/100)*2080*SUPPLIER_HOURLY_RATE
+net_in = annual_benefit - inhouse_cost
 
-with st.expander("Time & Opportunity Inputs", expanded=False):
-    col4, col5, col6 = st.columns(3)
-    baseline_hours = col4.number_input(
-        "Annual Procurement Hours", value=defaults["baseline_hours"], step=50,
-        help="Average hours spent managing sourcing for selected domain"
-    )
-    time_saved_pct = col5.slider("Time Saved by Broker (%)", 0, 100, 50)
-    cost_per_hour = col6.number_input("Staff Cost per Hour ($)", value=150, step=10)
-    opp_value_per_hour = st.number_input("Opportunity Value per Hour ($)", value=250, step=10)
+# Cash Flows
+cf_out = [net_out]*YEARS
+cf_in = [net_in]*YEARS
+npv_out = sum(cf/((1+DISCOUNT_RATE)**i) for i,cf in enumerate(cf_out,1))
+npv_in = sum(cf/((1+DISCOUNT_RATE)**i) for i,cf in enumerate(cf_in,1))
+roi_out = (sum(cf_out)-annual_spend)/annual_spend*100
+roi_in = (sum(cf_in)-inhouse_cost)/inhouse_cost*100
+payback_out = next((i for i,cum in enumerate(np.cumsum(cf_out),1) if cum>annual_spend), None)
+payback_in = next((i for i,cum in enumerate(np.cumsum(cf_in),1) if cum>inhouse_cost), None)
 
-# -- Calculation Function --
-def calc(spend, save_pct, fee_pct, hrs, time_pct, cost_hr, opp_hr):
-    gross = spend * save_pct / 100
-    fee = spend * fee_pct / 100
-    net = gross - fee
-    hrs_saved = hrs * time_pct / 100
-    time_val = hrs_saved * cost_hr
-    opp_val = hrs_saved * opp_hr
-    total_benefit = net + time_val + opp_val
-    fin_roi = net / fee if fee else np.nan
-    total_roi = total_benefit / fee if fee else np.nan
-    return gross, fee, net, hrs_saved, time_val, opp_val, total_benefit, fin_roi, total_roi
+# Plot Function
+def plot_bar(data, name):
+    df = pd.DataFrame({"Year":range(1,YEARS+1),"Net Benefit":data})
+    fig = go.Figure(data=[go.Bar(x=df.Year,y=df["Net Benefit"],name=name)])
+    fig.update_layout(xaxis_title="Year",yaxis_title="Net Benefit ($)",legend=dict(orientation="h"),plot_bgcolor="#FFFFFF")
+    return fig
 
-# -- Compute Metrics --
-gross, fee, net, hrs_saved, time_val, opp_val, total, fin_roi, tot_roi = calc(
-    baseline_spend, savings_pct, fee_pct, baseline_hours, time_saved_pct, cost_per_hour, opp_value_per_hour
-)
+# Main UI
+st.title(f"🚀 ROI Calculator — {category}")
+t1,t2,t3,t4 = st.tabs(["📊 Summary","📈 Breakdown","🔍 Compare","📥 Export"])
 
-# -- KPI Metrics Cards --
-st.markdown("### Key Outcomes")
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("Net Savings ($)", f"{net:,.0f}")
-k2.metric("Total Benefit ($)", f"{total:,.0f}")
-k3.metric("Financial ROI (x)", f"{fin_roi:.2f}")
-k4.metric("Total ROI (x)", f"{tot_roi:.2f}")
+with t1:
+    st.subheader("Key Metrics")
+    c1,c2 = st.columns(2)
+    c1.metric("Outsourced NPV",f"${npv_out:,.0f}",help="Net present value of outsourcing scenario.")
+    c1.metric("Outsourced ROI",f"{roi_out:.1f}%")
+    c1.metric("Payback Period",f"{payback_out or '> Horizon'} yrs")
+    c2.metric("In-House NPV",f"${npv_in:,.0f}")
+    c2.metric("In-House ROI",f"{roi_in:.1f}%")
+    c2.metric("Payback Period",f"{payback_in or '> Horizon'} yrs")
 
-# -- Side-by-Side Metrics Table --
-st.subheader("In‑House vs. IT Broker Metrics")
-df_compare = pd.DataFrame({
-    "Metric": [
-        "Gross Savings ($)",
-        "Broker Fee Cost ($)",
-        "Net Savings ($)",
-        "Hours Saved",
-        "Time Savings Value ($)",
-        "Opportunity Value ($)",
-        "Total Benefit ($)",
-        "Financial ROI (x)",
-        "Total ROI (x)"
-    ],
-    "In‑House": [
-        0,  # gross savings
-        0,  # fee cost
-        0,  # net savings
-        0,  # hours saved
-        0,  # time value
-        0,  # opportunity value
-        0,  # total benefit
-        np.nan,  # financial ROI
-        np.nan   # total ROI
-    ],
-    "IT Broker": [
-        gross,
-        fee,
-        net,
-        hrs_saved,
-        time_val,
-        opp_val,
-        total,
-        fin_roi,
-        tot_roi
-    ]
-}).set_index("Metric")
-st.table(df_compare)
+with t2:
+    st.subheader("Annual Net Benefit: Outsourced")
+    st.plotly_chart(plot_bar(cf_out,'Outsourced'),use_container_width=True)
 
-# -- Charts --
-st.markdown("### Benefit Breakdown")
-fig1, ax1 = plt.subplots(figsize=(4,4))
-ax1.pie([net, time_val, opp_val], labels=["Net", "Time Value", "Opportunity"], autopct="%1.1f%%", startangle=140)
-ax1.set_title("Benefit Distribution")
-st.pyplot(fig1, use_container_width=True)
+with t3:
+    st.subheader("Scenario Comparison")
+    fig=go.Figure()
+    fig.add_trace(go.Bar(x=list(range(1,YEARS+1)),y=cf_in,name='In-House'))
+    fig.add_trace(go.Bar(x=list(range(1,YEARS+1)),y=cf_out,name='Outsourced'))
+    fig.update_layout(barmode='group',xaxis={'title':'Year'},yaxis={'title':'Net Benefit ($)'},legend=dict(orientation='h'))
+    st.plotly_chart(fig,use_container_width=True)
 
-st.markdown("### 3-Year Cumulative Benefit Projection")
-years = list(range(1, 4+1))
-cum_benefits = [total * y for y in years]
-fig2, ax2 = plt.subplots()
-ax2.plot(years, cum_benefits, marker='o', color="#D80016")
-ax2.set_xlabel("Year"); ax2.set_ylabel("Cumulative Benefit ($)")
-st.pyplot(fig2, use_container_width=True)
+with t4:
+    st.subheader("Download Options")
+    # CSV
+    df_export = pd.DataFrame({"Year":range(1,YEARS+1),"Outsourced":cf_out,"In-House":cf_in})
+    st.download_button("Download CSV",df_export.to_csv(index=False).encode(),'roi.csv')
+    # PDF
+    pdf_buffer=BytesIO()
+    pdf=FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial","B",16)
+    pdf.cell(0,10,f"ROI Report — {category}",ln=True)
+    pdf.ln(5)
+    for label,val in [("Outsourced NPV",f"${npv_out:,.0f}"),
+                      ("In-House NPV",f"${npv_in:,.0f}")]:
+        pdf.set_font("Arial","",12)
+        pdf.cell(60,8,label+":",border=0)
+        pdf.cell(40,8,val,ln=True)
+    pdf.output(pdf_buffer)
+    st.download_button("Download PDF",pdf_buffer.getvalue(),'roi_report.pdf')
 
-st.markdown("### ROI Sensitivity Analysis")
-s_range = list(range(max(0, savings_pct-10), min(100, savings_pct+10)+1, 5))
-fig3, ax3 = plt.subplots()
-for f in [max(0, fee_pct-2), fee_pct, min(50, fee_pct+2)]:
-    vals = [calc(baseline_spend, s, f, baseline_hours, time_saved_pct, cost_per_hour, opp_value_per_hour)[8] for s in s_range]
-    ax3.plot(s_range, vals, marker='o', label=f"Fee {f}%")
-ax3.axhline(1, linestyle='--', color="#000000")
-ax3.set_xlabel("Savings (%)"); ax3.set_ylabel("Total ROI (x)")
-ax3.legend(title="Broker Fee")
-st.pyplot(fig3, use_container_width=True)
-
-# -- Download --
-st.markdown("### Download Your Results")
-df_out = pd.DataFrame({
-    "Metric": ["Net Savings", "Total Benefit", "Financial ROI", "Total ROI"],
-    "In‑House": [0, 0, np.nan, np.nan],
-    "Broker": [net, total, fin_roi, tot_roi]
-})
-st.download_button("Download CSV", df_out.to_csv(index=False), file_name="broker_vs_inhouse.csv")
-
-st.markdown("© TREU Partners • Strategic Advocacy in IT Sourcing")
+st.markdown("---")
+st.caption("*Values are estimates. Contact TREU Partners for tailored insights.*")
